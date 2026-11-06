@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OLED 표정 시뮬레이터</title>
+<style>
+:root{
+  --bg:#f1f3f2; --panel:#ffffff; --ink:#15201f; --muted:#56655f; --line:#d3dad7;
+  --btn:#e6ebe9; --btn-ink:#15201f; --on:#0c6b78; --on-ink:#ffffff; --focus:#0c6b78;
+  --bezel:#0a0e0f; --pin:#8a9a95;
+  color-scheme: light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1413; --panel:#172120; --ink:#e6efed; --muted:#9db0aa; --line:#2b3a37;
+    --btn:#223230; --btn-ink:#e6efed; --on:#27d3ee; --on-ink:#04171a; --focus:#27d3ee;
+    --bezel:#050808; --pin:#74867f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1413; --panel:#172120; --ink:#e6efed; --muted:#9db0aa; --line:#2b3a37;
+  --btn:#223230; --btn-ink:#e6efed; --on:#27d3ee; --on-ink:#04171a; --focus:#27d3ee;
+  --bezel:#050808; --pin:#74867f;
+  color-scheme: dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  line-height:1.5; -webkit-text-size-adjust:100%;
+}
+main{max-width:720px; margin:0 auto; padding:20px 16px 40px; display:flex; flex-direction:column; gap:20px}
+h1{font-size:1.35rem; margin:0; letter-spacing:-0.01em}
+.sub{margin:2px 0 0; color:var(--muted); font-size:.9rem}
+h2{font-size:1rem; margin:0 0 10px}
+
+.device{background:var(--bezel); border-radius:16px; padding:12px 12px 14px; box-shadow:0 0 0 1px var(--line)}
+.pins{display:flex; justify-content:center; gap:18px; color:var(--pin); font:11px ui-monospace,Menlo,Consolas,monospace; padding:0 0 8px}
+#oled{display:block; width:100%; height:auto; aspect-ratio:2/1; image-rendering:pixelated; border-radius:6px; touch-action:pan-y; cursor:crosshair}
+.hint{color:var(--pin); font-size:.78rem; text-align:center; margin-top:8px}
+
+section{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px}
+.emos{display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px}
+button{font:inherit; color:var(--btn-ink); background:var(--btn); border:1px solid transparent; border-radius:10px; padding:10px 8px; cursor:pointer; min-height:44px}
+button:focus-visible,input:focus-visible,summary:focus-visible,textarea:focus-visible{outline:3px solid var(--focus); outline-offset:2px}
+button[aria-pressed="true"]{background:var(--on); color:var(--on-ink); font-weight:700}
+.emos button{display:flex; flex-direction:column; align-items:center; gap:0; line-height:1.25}
+.emos small{font-size:.72rem; opacity:.75}
+
+.row{display:flex; gap:8px}
+input[type=text]{flex:1; min-width:0; font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-height:44px}
+.read{margin:8px 0 0; color:var(--muted); font-size:.88rem; min-height:1.4em}
+.seg{display:flex; gap:8px; flex-wrap:wrap}
+.opts{display:flex; flex-direction:column; gap:10px}
+.opt{display:flex; align-items:center; gap:10px; min-height:32px}
+.opt input{width:20px; height:20px; accent-color:var(--on)}
+.opt .lbl{font-size:.92rem}
+.group-title{font-size:.85rem; color:var(--muted); margin:0 0 6px}
+details summary{cursor:pointer; font-weight:600; min-height:32px}
+textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,Menlo,Consolas,monospace; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; resize:vertical}
+.note{color:var(--muted); font-size:.82rem; margin:8px 0 0}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>OLED 표정 시뮬레이터</h1>
+    <p class="sub">128×64 픽셀 · SSD1306 · 감정 8종</p>
+  </header>
+
+  <div class="device">
+    <div class="pins" aria-hidden="true"><span>GND</span><span>VDD</span><span>SCL</span><span>SDA</span></div>
+    <canvas id="oled" width="768" height="384" role="img" aria-label="OLED 화면 시뮬레이션"></canvas>
+    <div class="hint">화면 위로 손가락이나 마우스를 움직이면 눈이 따라갑니다</div>
+  </div>
+
+  <section>
+    <h2>감정 선택</h2>
+    <div class="emos" id="emos"></div>
+  </section>
+
+  <section>
+    <h2>대화로 표정 바꾸기</h2>
+    <div class="row">
+      <input type="text" id="msg" placeholder="예: 오늘 정말 기뻐요" autocomplete="off" enterkeyhint="send">
+      <button id="send" type="button">보내기</button>
+    </div>
+    <button type="button" id="mic" aria-pressed="false" style="width:100%;margin-top:8px">🎤 말하기</button>
+    <p class="read" id="read" aria-live="polite">글을 입력하거나 마이크로 말하면 감정 단어를 찾아 표정을 바꿉니다.</p>
+  </section>
+
+  <section>
+    <h2>화면 설정</h2>
+    <p class="group-title">화면 색상</p>
+    <div class="seg" id="colors">
+      <button type="button" data-c="dual" aria-pressed="true">2색 (상단 노랑)</button>
+      <button type="button" data-c="cyan" aria-pressed="false">단색 청록</button>
+      <button type="button" data-c="white" aria-pressed="false">단색 흰색</button>
+    </div>
+    <div class="opts" style="margin-top:14px">
+      <label class="opt"><input type="checkbox" id="optGrid" checked><span class="lbl">픽셀 격자 표시</span></label>
+      <label class="opt"><input type="checkbox" id="optAuto" checked><span class="lbl">눈 깜빡임·시선 자동 동작</span></label>
+      <label class="opt"><input type="checkbox" id="optTalk"><span class="lbl">입 계속 움직이기 (말하는 중)</span></label>
+    </div>
+  </section>
+
+  <section>
+    <details>
+      <summary>ESP32 이식용 표정 파라미터</summary>
+      <p class="note">표정마다 눈 크기, 기울기, 입 모양을 정수·실수 값으로 정리한 표입니다. 이 표를 U8g2 또는 Adafruit_SSD1306 그리기 함수에 넣으면 같은 표정을 낼 수 있습니다.</p>
+      <textarea id="exp" readonly spellcheck="false"></textarea>
+      <div class="row" style="margin-top:8px"><button type="button" id="copy">복사</button></div>
+      <p class="note" id="copyMsg" aria-live="polite"></p>
+    </details>
+  </section>
+</main>
+
+<script>
+(function(){
+  var W = 128, H = 64, S = 6;
+  var HEADER_H = 16, EYE_Y = 35, MOUTH_Y = 56;
+
+  var off = document.createElement('canvas');
+  off.width = W; off.height = H;
+  var g = off.getContext('2d', { willReadFrequently: true });
+  var view = document.getElementById('oled');
+  var v = view.getContext('2d');
+
+  /* 표정 정의: 눈 종류(box/happy/heart/line)와 보간되는 숫자 값 */
+  var DEF = { w:26, h:30, r:7, gap:20, tiltIn:0, tiltOut:0, mouthCurve:0, mouthW:8, mouthOpen:0, gx:0, gy:0, mx:0, hL:1 };
+  function mk(o){ var n = {}; for (var k in DEF) n[k] = DEF[k]; for (var k2 in o) n[k2] = o[k2]; return n; }
+  var E = {
+    standby:   mk({ label:'Standby',   ko:'대기',   kind:'box' }),
+    happy:     mk({ label:'Happy',     ko:'기쁨',   kind:'happy', w:26, h:0, r:0, gap:18, mouthCurve:1, mouthW:20 }),
+    sad:       mk({ label:'Sad',       ko:'슬픔',   kind:'box', w:24, h:26, r:8, gap:22, tiltOut:11, mouthCurve:-1, mouthW:14, gy:2 }),
+    angry:     mk({ label:'Angry',     ko:'화남',   kind:'box', w:26, h:24, r:5, gap:18, tiltIn:12, mouthCurve:-0.7, mouthW:18 }),
+    surprised: mk({ label:'Surprised', ko:'놀람',   kind:'box', w:28, h:32, r:13, gap:18, mouthOpen:1, mouthW:10 }),
+    sleepy:    mk({ label:'Sleepy',    ko:'졸림',   kind:'line', w:28, h:3, r:1, gap:18, mouthW:6, extra:'zzz' }),
+    love:      mk({ label:'Love',      ko:'사랑',   kind:'heart', w:30, h:0, r:0, gap:14, mouthCurve:0.8, mouthW:16 }),
+    thinking:  mk({ label:'Thinking',  ko:'생각',   kind:'box', w:24, h:28, r:7, gap:22, hL:0.7, gx:6, gy:-4, mx:8, extra:'dots' })
+  };
+  var ORDER = ['standby','happy','sad','angry','surprised','sleepy','love','thinking'];
+  var KEYS = Object.keys(DEF);
+
+  var cur = {}, kind = 'box', tgtName = 'standby', tgt = E.standby;
+  KEYS.forEach(function(k){ cur[k] = E.standby[k]; });
+
+  var trans = null, blink = null, nextBlink = 1500;
+  var gaze = { x:0, y:0 }, gazeTgt = { x:0, y:0 }, nextGaze = 2000, hover = false;
+  var talkUntil = 0;
+  var colorMode = 'dual';
+
+  var optGrid = document.getElementById('optGrid');
+  var optAuto = document.getElementById('optAuto');
+  var optTalk = document.getElementById('optTalk');
+
+  /* ---------- 감정 버튼 ---------- */
+  var emos = document.getElementById('emos');
+  ORDER.forEach(function(name){
+    var b = document.createElement('button');
+    b.type = 'button'; b.dataset.e = name;
+    b.setAttribute('aria-pressed', name === 'standby' ? 'true' : 'false');
+    b.innerHTML = '<span>' + E[name].ko + '</span><small>' + E[name].label + '</small>';
+    b.addEventListener('click', function(){ setEmotion(name); });
+    emos.appendChild(b);
+  });
+
+  function setEmotion(name){
+    if (name === tgtName) return;
+    tgtName = name; tgt = E[name];
+    Array.prototype.forEach.call(emos.children, function(b){
+      b.setAttribute('aria-pressed', b.dataset.e === name ? 'true' : 'false');
+    });
+    if (tgt.kind !== kind) trans = { t0: performance.now(), swapped: false };
+  }
+
+  /* ---------- 대화 → 감정 ---------- */
+  var RULES = [
+    ['love',      /사랑|♥|❤|보고\s?싶|좋아해/],
+    ['angry',     /화나|화가|짜증|싫어|미워|열받/],
+    ['sad',       /슬프|슬퍼|ㅠ|ㅜ|미안|힘들|우울|외로/],
+    ['surprised', /헉|놀라|놀랐|대박|우와|깜짝/],
+    ['sleepy',    /졸려|졸리|피곤|잘자|자러/],
+    ['thinking',  /^(음+|흠+)([\s.…?]|$)|글쎄|생각|고민|궁금/],
+    ['happy',     /기뻐|기쁘|좋아|행복|고마|감사|ㅎㅎ|ㅋㅋ|하하|최고|반가/]
+  ];
+  var msg = document.getElementById('msg'), read = document.getElementById('read');
+  /* 부정 표현: 키워드 바로 앞의 "안/못"(띄어쓰기 앞이거나 문장 처음) 또는 바로 뒤의 "~지 않/~지 마/~지 말/~지 못" */
+  var NEG_BEFORE = /(^|[\s,.!?~…])(안|못)\s?$/;
+  var NEG_AFTER  = /^[가-힣]{0,3}?(지는|지도|지|진)\s?(않|마|말|못)/;
+  var lastNegated = [];
+  function isNegated(text, start, end){
+    return NEG_BEFORE.test(text.slice(Math.max(0, start - 6), start)) || NEG_AFTER.test(text.slice(end, end + 8));
+  }
+  function detect(text){
+    lastNegated = [];
+    for (var i = 0; i < RULES.length; i++) {
+      var re = new RegExp(RULES[i][1].source, 'g'), m;
+      while ((m = re.exec(text))) {
+        if (!m[0]) { re.lastIndex++; continue; }
+        var end = m.index + m[0].length;
+        if (isNegated(text, m.index, end)) { lastNegated.push(m[0]); continue; } // 부정된 단어는 건너뛰고 다음 후보를 본다
+        return RULES[i][0];
+      }
+    }
+    return null;
+  }
+  /* AI 감정 판별: 같은 서버의 /api/emotion(server.py)에 물어보고, 실패하면 키워드 규칙으로 대체 */
+  var aiSeq = 0;
+  function detectAI(text, cb){
+    var seq = ++aiSeq, done = false;
+    function finish(emotion, how, why){
+      if (done || seq !== aiSeq) return; // 더 새 문장이 들어왔으면 이전 결과는 버린다
+      done = true; cb(emotion, how, why);
+    }
+    function fallback(why){
+      var emo = detect(text) || 'standby';
+      finish(emo, '키워드', lastNegated.length ? '부정 표현 제외: ' + lastNegated.join(', ') : '');
+    }
+    // 파일로 열었거나 GitHub Pages처럼 server.py가 없는 곳이면 바로 키워드 방식
+    if (!window.fetch || location.protocol === 'file:' || /\.github\.io$/.test(location.hostname)) { fallback('AI 서버 없음'); return; }
+    var timer = setTimeout(function(){ fallback('AI 응답 지연'); }, 8000);
+    fetch('/api/emotion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text }) })
+      .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+      .then(function(res){
+        clearTimeout(timer);
+        if (res.ok && E[res.j.emotion]) finish(res.j.emotion, 'AI', res.j.reason);
+        else fallback(res.j && res.j.error ? res.j.error : 'AI 실패');
+      })
+      .catch(function(){ clearTimeout(timer); fallback('AI 서버 연결 실패'); });
+  }
+  function showResult(text, emotion, how, why){
+    read.textContent = '“' + text + '” → ' + E[emotion].ko + ' (' + E[emotion].label + ') · ' + how + (why ? ' · ' + why : '');
+    setEmotion(emotion);
+    talkUntil = performance.now() + 1500;
+  }
+  function send(){
+    var text = msg.value.trim();
+    if (!text) { read.textContent = '문장을 입력하면 감정을 찾아 표정을 바꿉니다.'; return; }
+    msg.value = '';
+    read.textContent = '“' + text + '” → 감정 판별 중...';
+    setEmotion('thinking');
+    detectAI(text, function(emotion, how, why){ showResult(text, emotion, how, why); });
+  }
+
+  /* ---------- 마이크 음성 인식 ---------- */
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var mic = document.getElementById('mic');
+  var rec = null, listening = false;
+  function setMic(on){
+    listening = on;
+    mic.setAttribute('aria-pressed', on ? 'true' : 'false');
+    mic.textContent = on ? '🎤 듣는 중 (누르면 중지)' : '🎤 말하기';
+  }
+  var micGranted = false, lastStart = 0, quickEnds = 0;
+  function startMic(){
+    if (!SR) { read.textContent = '이 브라우저는 음성 인식을 지원하지 않습니다. 안드로이드 크롬에서 열어 주세요.'; return; }
+    // 처음 한 번 getUserMedia로 권한을 받아 두면 브라우저가 이 주소의 허용을 기억한다.
+    if (!micGranted && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      read.textContent = '마이크 권한을 확인하는 중...';
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
+        stream.getTracks().forEach(function(t){ t.stop(); });
+        micGranted = true; startMic();
+      }).catch(function(err){
+        setMic(false);
+        read.textContent = (err && err.name === 'NotFoundError')
+          ? '마이크 장치를 찾지 못했습니다.'
+          : '마이크 권한이 막혀 있습니다. 주소창 왼쪽 자물쇠 → 권한 → 마이크를 "허용"으로 바꿔 주세요.';
+      });
+      return;
+    }
+    quickEnds = 0;
+    rec = new SR();
+    rec.lang = 'ko-KR'; rec.continuous = true; rec.interimResults = true;
+    rec.onresult = function(e){
+      var interim = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var r = e.results[i], tx = r[0].transcript.trim();
+        if (r.isFinal) {
+          if (!tx) continue;
+          read.textContent = '“' + tx + '” → 감정 판별 중...';
+          setEmotion('thinking');
+          (function(t){ detectAI(t, function(emotion, how, why){ showResult(t, emotion, how, why); }); })(tx);
+        } else { interim += tx; }
+      }
+      if (interim) { read.textContent = '듣는 중: ' + interim; talkUntil = performance.now() + 700; }
+    };
+    rec.onerror = function(e){
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        listening = false;
+        read.textContent = '마이크 권한이 막혀 있습니다. 브라우저 권한을 허용하거나, 이 페이지를 크롬에서 직접 열어 주세요.';
+      } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        read.textContent = '음성 인식 오류: ' + e.error;
+      }
+    };
+    rec.onend = function(){
+      if (!listening) { setMic(false); return; }
+      // 시작하자마자 끝나는 일이 반복되면(권한 창 반복 등) 자동 재시작을 멈춘다.
+      quickEnds = (performance.now() - lastStart < 1500) ? quickEnds + 1 : 0;
+      if (quickEnds >= 3) { setMic(false); read.textContent = '음성 인식이 계속 끊겨 멈췄습니다. 🎤 버튼을 다시 눌러 주세요.'; return; }
+      setTimeout(function(){
+        if (!listening) return;
+        try { lastStart = performance.now(); rec.start(); } catch (err) { setMic(false); }
+      }, 300);
+    };
+    try { lastStart = performance.now(); rec.start(); setMic(true); read.textContent = '말씀해 보세요. 문장이 끝나면 표정이 바뀝니다.'; }
+    catch (err) { setMic(false); read.textContent = '마이크를 시작하지 못했습니다.'; }
+  }
+  function stopMic(){ listening = false; if (rec) { try { rec.stop(); } catch (err) {} } setMic(false); }
+  mic.addEventListener('click', function(){ if (listening) stopMic(); else startMic(); });
+  document.getElementById('send').addEventListener('click', send);
+  msg.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); } });
+
+  /* ---------- 색상 ---------- */
+  var colorBtns = document.getElementById('colors');
+  colorBtns.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if (!b) return;
+    colorMode = b.dataset.c;
+    Array.prototype.forEach.call(colorBtns.children, function(x){ x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+  });
+
+  /* ---------- 시선 (포인터) ---------- */
+  function onPointer(e){
+    var r = view.getBoundingClientRect();
+    var px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+    hover = true;
+    gazeTgt.x = Math.max(-1, Math.min(1, (px - 0.5) * 2)) * 9;
+    gazeTgt.y = Math.max(-1, Math.min(1, (py - 0.5) * 2)) * 4;
+  }
+  view.addEventListener('pointermove', onPointer);
+  view.addEventListener('pointerdown', onPointer);
+  view.addEventListener('pointerleave', function(){ hover = false; });
+  view.addEventListener('pointerup', function(e){ if (e.pointerType !== 'mouse') hover = false; });
+  view.addEventListener('pointercancel', function(){ hover = false; });
+
+  /* ---------- 그리기 도구 ---------- */
+  function rr(x, y, w, h, r){
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + w, y, x + w, y + h, r);
+    g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r);
+    g.arcTo(x, y, x + w, y, r);
+    g.closePath();
+  }
+  function heart(cx, cy, s){
+    var k = s / 2;
+    g.beginPath();
+    g.moveTo(cx, cy + k * 0.95);
+    g.bezierCurveTo(cx - k * 1.75, cy - k * 0.15, cx - k * 0.95, cy - k * 1.3, cx, cy - k * 0.45);
+    g.bezierCurveTo(cx + k * 0.95, cy - k * 1.3, cx + k * 1.75, cy - k * 0.15, cx, cy + k * 0.95);
+    g.fill();
+  }
+
+  function eyes(b, t){
+    var gx = gaze.x + cur.gx, gy = gaze.y + cur.gy;
+    for (var i = 0; i < 2; i++) {
+      var s = i === 0 ? 1 : -1;               // 안쪽 방향 (왼쪽 눈은 +x)
+      var cx = 64 + (i === 0 ? -1 : 1) * (cur.gap / 2 + cur.w / 2) + gx;
+      var cy = EYE_Y + gy;
+      if (kind === 'box') {
+        var hm = i === 0 ? cur.hL : 1;
+        var eh = Math.max(2, cur.h * hm * (1 - b));
+        var top = cy - eh / 2;
+        rr(cx - cur.w / 2, top, cur.w, eh, cur.r);
+        g.fill();
+        if (cur.tiltIn > 0.4 || cur.tiltOut > 0.4) {
+          g.globalCompositeOperation = 'destination-out';
+          var ox = cx - s * cur.w / 2 - s, ix = cx + s * cur.w / 2 + s;
+          if (cur.tiltIn > 0.4) {
+            g.beginPath(); g.moveTo(ox, top - 1); g.lineTo(ix, top - 1); g.lineTo(ix, top + cur.tiltIn * (1 - b)); g.closePath(); g.fill();
+          }
+          if (cur.tiltOut > 0.4) {
+            g.beginPath(); g.moveTo(ix, top - 1); g.lineTo(ox, top - 1); g.lineTo(ox, top + cur.tiltOut * (1 - b)); g.closePath(); g.fill();
+          }
+          g.globalCompositeOperation = 'source-over';
+        }
+      } else if (b > 0.6) {
+        continue;                              // 표정 전환 중 잠깐 꺼짐
+      } else if (kind === 'happy') {
+        g.lineWidth = 5;
+        g.beginPath(); g.arc(cx, cy + 7, cur.w / 2 - 2, Math.PI * 1.12, Math.PI * 1.88); g.stroke();
+      } else if (kind === 'heart') {
+        heart(cx, cy, cur.w * (1 + 0.07 * Math.sin(t * 6)));
+      } else if (kind === 'line') {
+        var lw = cur.w, br = 1 + 0.5 * Math.sin(t * 2);
+        rr(cx - lw / 2, cy + 2 - br / 2, lw, 3 + br, 2); g.fill();
+      }
+    }
+  }
+
+  function mouth(t, now){
+    var talking = optTalk.checked || now < talkUntil;
+    var mw = cur.mouthW, open = cur.mouthOpen;
+    if (talking) { open = Math.max(open, 0.15 + 0.85 * Math.abs(Math.sin(t * 11))); mw = Math.max(mw, 12); }
+    if (mw < 1) return;
+    var cx = 64 + cur.mx + gaze.x * 0.3, cy = MOUTH_Y;
+    if (open > 0.25) {
+      g.beginPath();
+      g.ellipse(cx, cy + 1, mw / 2, Math.max(1.5, mw / 2 * open), 0, 0, Math.PI * 2);
+      g.fill();
+    } else {
+      var c = cur.mouthCurve;
+      g.lineWidth = 2.5;
+      g.beginPath();
+      g.moveTo(cx - mw / 2, cy - c * 2);
+      g.quadraticCurveTo(cx, cy + c * 10, cx + mw / 2, cy - c * 2);
+      g.stroke();
+    }
+  }
+
+  function extras(t){
+    if (tgt.extra === 'zzz') {
+      g.font = 'bold 10px ui-monospace, Menlo, Consolas, monospace';
+      g.textAlign = 'left';
+      var y1 = 34 - ((t * 5) % 12), y2 = 30 - (((t + 0.6) * 5) % 12);
+      if (y1 > 21) g.fillText('Z', 108, y1);
+      if (y2 > 21) g.fillText('z', 116, y2);
+    } else if (tgt.extra === 'dots') {
+      var n = Math.floor(t * 2.5) % 4;
+      for (var k = 0; k < 3; k++) if (n > k) g.fillRect(8 + k * 6, 24, 3, 3);
+    }
+  }
+
+  function header(){
+    g.lineWidth = 1.6;
+    g.beginPath(); g.arc(9, 14, 4, -Math.PI * 0.75, -Math.PI * 0.25); g.stroke();
+    g.beginPath(); g.arc(9, 14, 8, -Math.PI * 0.75, -Math.PI * 0.25); g.stroke();
+    g.beginPath(); g.arc(9, 14, 12, -Math.PI * 0.75, -Math.PI * 0.25); g.stroke();
+    g.beginPath(); g.arc(9, 14, 1.2, 0, Math.PI * 2); g.fill();
+    g.font = 'bold 12px ui-monospace, Menlo, Consolas, monospace';
+    g.textAlign = 'center';
+    g.fillText(tgt.label, 72, 12);
+  }
+
+  /* ---------- 프레임 ---------- */
+  function colorFor(y){
+    if (colorMode === 'dual') return y < HEADER_H ? '#f4c542' : '#27d3ee';
+    if (colorMode === 'cyan') return '#27d3ee';
+    return '#e8f1f2';
+  }
+
+  function step(dt, now){
+    var k = Math.min(1, dt * 12);
+    for (var i = 0; i < KEYS.length; i++) { var key = KEYS[i]; cur[key] += (tgt[key] - cur[key]) * k; }
+
+    var b = 0;
+    if (trans) {
+      var tt = now - trans.t0;
+      if (tt >= 80 && !trans.swapped) {
+        trans.swapped = true; kind = tgt.kind;
+        KEYS.forEach(function(key){ cur[key] = tgt[key]; });
+      }
+      if (tt < 80) b = tt / 80; else if (tt < 190) b = 1 - (tt - 80) / 110; else trans = null;
+    }
+    if (optAuto.checked && kind === 'box' && !trans) {
+      if (!blink && now > nextBlink) { blink = { t0: now }; nextBlink = now + 2500 + Math.random() * 3000; }
+    }
+    if (blink) {
+      var bt = now - blink.t0;
+      if (bt > 160) blink = null; else b = Math.max(b, 1 - Math.abs(1 - 2 * bt / 160));
+    }
+
+    if (!hover) {
+      if (optAuto.checked) {
+        if (now > nextGaze) {
+          gazeTgt.x = (Math.random() * 2 - 1) * 6;
+          gazeTgt.y = (Math.random() * 2 - 1) * 3;
+          nextGaze = now + 1500 + Math.random() * 2500;
+        }
+      } else { gazeTgt.x = 0; gazeTgt.y = 0; }
+    }
+    gaze.x += (gazeTgt.x - gaze.x) * Math.min(1, dt * 9);
+    gaze.y += (gazeTgt.y - gaze.y) * Math.min(1, dt * 9);
+    return b;
+  }
+
+  function render(b, t, now){
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineJoin = 'round';
+    eyes(b, t); mouth(t, now); extras(t); header();
+
+    var d = g.getImageData(0, 0, W, H).data;
+    var grid = optGrid.checked;
+    var size = grid ? S - 1 : S;
+    v.fillStyle = grid ? '#030708' : '#000';
+    v.fillRect(0, 0, view.width, view.height);
+    var lastC = '';
+    for (var y = 0; y < H; y++) {
+      var c = colorFor(y);
+      for (var x = 0; x < W; x++) {
+        var a = d[(y * W + x) * 4 + 3];
+        if (a > 127) {
+          if (lastC !== c) { v.fillStyle = c; lastC = c; }
+          v.fillRect(x * S, y * S, size, size);
+        } else if (grid) {
+          if (lastC !== '#0a1416') { v.fillStyle = '#0a1416'; lastC = '#0a1416'; }
+          v.fillRect(x * S, y * S, size, size);
+        }
+      }
+    }
+  }
+
+  var last = performance.now();
+  function frame(now){
+    requestAnimationFrame(frame);
+    if (now - last < 33) return;
+    var dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    var b = step(dt, now);
+    render(b, now / 1000, now);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- ESP32 파라미터 내보내기 ---------- */
+  function buildExport(){
+    var kinds = { box:'BOX', happy:'HAPPY', heart:'HEART', line:'LINE' };
+    var s = '// OLED 128x64 표정 파라미터 (눈 중심 y=' + EYE_Y + ', 입 중심 y=' + MOUTH_Y + ', 상단 ' + HEADER_H + 'px 상태줄)\n';
+    s += 'enum EyeKind { BOX, HAPPY, HEART, LINE };\n';
+    s += 'struct Face {\n  EyeKind kind;\n  int8_t w, h, r, gap;        // 눈 크기·모서리·좌우 간격\n  int8_t tiltIn, tiltOut;     // 눈 위쪽 안쪽/바깥쪽 깎기(화남/슬픔)\n  int8_t mouthW, mx;          // 입 너비·가로 이동\n  int8_t gx, gy;              // 기본 시선 이동\n  float  mouthCurve;          // -1 찡그림 ~ 1 미소\n  float  mouthOpen;           // 0 닫힘 ~ 1 벌어짐\n  float  hL;                  // 왼쪽 눈 높이 배율\n};\n\n';
+    s += 'const Face FACES[] = {\n';
+    ORDER.forEach(function(n){
+      var f = E[n];
+      s += '  { ' + kinds[f.kind] + ', ' + [f.w, f.h, f.r, f.gap, f.tiltIn, f.tiltOut, f.mouthW, f.mx, f.gx, f.gy].join(', ') + ', ' + f.mouthCurve + 'f, ' + f.mouthOpen + 'f, ' + f.hL + 'f },  // ' + n + '\n';
+    });
+    s += '};\n';
+    return s;
+  }
+  var exp = document.getElementById('exp');
+  exp.value = buildExport();
+  document.getElementById('copy').addEventListener('click', function(){
+    var m = document.getElementById('copyMsg');
+    exp.focus(); exp.select();
+    var ok = false;
+    try { ok = document.execCommand && document.execCommand('copy'); } catch (e) { ok = false; }
+    if (!ok && navigator.clipboard) {
+      navigator.clipboard.writeText(exp.value).then(function(){ m.textContent = '복사했습니다.'; }, function(){ m.textContent = '복사하지 못했습니다. 텍스트를 길게 눌러 직접 복사해 주세요.'; });
+      return;
+    }
+    m.textContent = ok ? '복사했습니다.' : '복사하지 못했습니다. 텍스트를 길게 눌러 직접 복사해 주세요.';
+  });
+})();
+</script>
+</body>
+</html>
