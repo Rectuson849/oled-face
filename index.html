@@ -92,6 +92,9 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
       <button id="send" type="button">보내기</button>
     </div>
     <button type="button" id="mic" aria-pressed="false" style="width:100%;margin-top:8px">🎤 말하기</button>
+    <div class="opts" style="margin-top:10px">
+      <label class="opt"><input type="checkbox" id="optSpeak" checked><span class="lbl">🔊 감정에 맞게 소리 내어 대답하기</span></label>
+    </div>
     <p class="read" id="read" aria-live="polite">글을 입력하거나 마이크로 말하면 감정 단어를 찾아 표정을 바꿉니다.</p>
   </section>
 
@@ -239,6 +242,59 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     read.textContent = '“' + text + '” → ' + E[emotion].ko + ' (' + E[emotion].label + ') · ' + how + (why ? ' · ' + why : '');
     setEmotion(emotion);
     talkUntil = performance.now() + 1500;
+    reply(emotion);
+  }
+
+  /* ---------- 소리 내어 대답하기 (브라우저 음성 합성, ko-KR) ---------- */
+  var REPLIES = {
+    standby:   ['응, 그렇구나.', '응응, 듣고 있어.', '그래?'],
+    happy:     ['와, 나도 기뻐!', '좋다! 신난다!', '헤헤, 기분 좋아.'],
+    sad:       ['에구, 속상하겠다.', '괜찮아, 내가 옆에 있을게.', '많이 힘들었구나.'],
+    angry:     ['정말 화날 만하다!', '으, 나도 짜증 나!', '후우, 진정하자.'],
+    surprised: ['헉, 진짜?', '우와, 깜짝이야!', '세상에, 정말?'],
+    sleepy:    ['나도 졸려… 하암.', '푹 자, 잘 자.', '우리 좀 쉬자.'],
+    love:      ['나도 너 좋아!', '헤헤, 부끄러워.', '사랑해!'],
+    thinking:  ['음… 같이 생각해 보자.', '글쎄, 어떨까?', '흠, 궁금하네.']
+  };
+  var synth = window.speechSynthesis, optSpeak = document.getElementById('optSpeak');
+  var koVoice = null, speaking = false, speakTimer = null, lastReply = {};
+  try { if (localStorage.getItem('faceSpeak') === 'off') optSpeak.checked = false; } catch (err) {}
+  optSpeak.addEventListener('change', function(){
+    try { localStorage.setItem('faceSpeak', optSpeak.checked ? 'on' : 'off'); } catch (err) {}
+    if (!optSpeak.checked && synth) synth.cancel();
+  });
+  if (!synth || !window.SpeechSynthesisUtterance) {
+    optSpeak.checked = false; optSpeak.disabled = true;
+    optSpeak.nextElementSibling.textContent = '🔊 이 브라우저는 소리 내어 대답하기를 지원하지 않습니다';
+  } else {
+    var pickVoice = function(){
+      var vs = synth.getVoices();
+      for (var i = 0; i < vs.length; i++) { if (/^ko/i.test(vs[i].lang)) { koVoice = vs[i]; return; } }
+    };
+    pickVoice();
+    if ('onvoiceschanged' in synth) synth.onvoiceschanged = pickVoice;
+  }
+  function speechDone(){
+    if (!speaking) return;
+    speaking = false; clearTimeout(speakTimer);
+    resumeMic();
+  }
+  function reply(emotion){
+    if (!synth || !optSpeak.checked) return;
+    var list = REPLIES[emotion] || REPLIES.standby, i;
+    do { i = Math.floor(Math.random() * list.length); } while (list.length > 1 && list[i] === lastReply[emotion]);
+    lastReply[emotion] = list[i];
+    var u = new SpeechSynthesisUtterance(list[i]);
+    u.lang = 'ko-KR'; if (koVoice) u.voice = koVoice;
+    u.rate = 1.05; u.pitch = 1.3;
+    u.onend = u.onerror = speechDone;
+    synth.cancel();
+    pauseMic(); // 자기 목소리를 다시 알아듣지 않도록 말하는 동안 듣기를 멈춘다
+    speaking = true;
+    clearTimeout(speakTimer);
+    speakTimer = setTimeout(speechDone, list[i].length * 300 + 3000); // onend가 안 오는 기기 대비
+    synth.speak(u);
+    read.textContent += ' · 🔊 “' + list[i] + '”';
   }
   function send(){
     var text = msg.value.trim();
@@ -279,6 +335,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     rec = new SR();
     rec.lang = 'ko-KR'; rec.continuous = true; rec.interimResults = true;
     rec.onresult = function(e){
+      if (speaking) return;
       var interim = '';
       for (var i = e.resultIndex; i < e.results.length; i++) {
         var r = e.results[i], tx = r[0].transcript.trim();
@@ -301,18 +358,31 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     };
     rec.onend = function(){
       if (!listening) { setMic(false); return; }
+      if (pausedForSpeech) return; // 대답하는 동안 일부러 멈춘 것. 대답이 끝나면 resumeMic()이 다시 켠다
       // 시작하자마자 끝나는 일이 반복되면(권한 창 반복 등) 자동 재시작을 멈춘다.
       quickEnds = (performance.now() - lastStart < 1500) ? quickEnds + 1 : 0;
       if (quickEnds >= 3) { setMic(false); read.textContent = '음성 인식이 계속 끊겨 멈췄습니다. 🎤 버튼을 다시 눌러 주세요.'; return; }
       setTimeout(function(){
-        if (!listening) return;
+        if (!listening || pausedForSpeech) return;
         try { lastStart = performance.now(); rec.start(); } catch (err) { setMic(false); }
       }, 300);
     };
     try { lastStart = performance.now(); rec.start(); setMic(true); read.textContent = '말씀해 보세요. 문장이 끝나면 표정이 바뀝니다.'; }
     catch (err) { setMic(false); read.textContent = '마이크를 시작하지 못했습니다.'; }
   }
-  function stopMic(){ listening = false; if (rec) { try { rec.stop(); } catch (err) {} } setMic(false); }
+  function stopMic(){ listening = false; pausedForSpeech = false; if (rec) { try { rec.stop(); } catch (err) {} } setMic(false); }
+  var pausedForSpeech = false;
+  function pauseMic(){
+    if (listening && rec) { pausedForSpeech = true; try { rec.stop(); } catch (err) {} }
+  }
+  function resumeMic(){
+    if (!pausedForSpeech) return;
+    setTimeout(function(){
+      pausedForSpeech = false;
+      if (!listening || !rec || speaking) return;
+      try { quickEnds = 0; lastStart = performance.now(); rec.start(); } catch (err) {}
+    }, 400);
+  }
   mic.addEventListener('click', function(){ if (listening) stopMic(); else startMic(); });
   document.getElementById('send').addEventListener('click', send);
   msg.addEventListener('keydown', function(e){ if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); send(); } });
@@ -397,7 +467,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
   }
 
   function mouth(t, now){
-    var talking = optTalk.checked || now < talkUntil;
+    var talking = optTalk.checked || now < talkUntil || speaking;
     var mw = cur.mouthW, open = cur.mouthOpen;
     if (talking) { open = Math.max(open, 0.15 + 0.85 * Math.abs(Math.sin(t * 11))); mw = Math.max(mw, 12); }
     if (mw < 1) return;
