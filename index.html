@@ -242,20 +242,42 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     read.textContent = '“' + text + '” → ' + E[emotion].ko + ' (' + E[emotion].label + ') · ' + how + (why ? ' · ' + why : '');
     setEmotion(emotion);
     talkUntil = performance.now() + 1500;
-    reply(emotion);
+    reply(emotion, text);
   }
 
   /* ---------- 소리 내어 대답하기 (브라우저 음성 합성, ko-KR) ---------- */
   var REPLIES = {
-    standby:   ['응, 그렇구나.', '응응, 듣고 있어.', '그래?'],
-    happy:     ['와, 나도 기뻐!', '좋다! 신난다!', '헤헤, 기분 좋아.'],
-    sad:       ['에구, 속상하겠다.', '괜찮아, 내가 옆에 있을게.', '많이 힘들었구나.'],
-    angry:     ['정말 화날 만하다!', '으, 나도 짜증 나!', '후우, 진정하자.'],
-    surprised: ['헉, 진짜?', '우와, 깜짝이야!', '세상에, 정말?'],
-    sleepy:    ['나도 졸려… 하암.', '푹 자, 잘 자.', '우리 좀 쉬자.'],
-    love:      ['나도 너 좋아!', '헤헤, 부끄러워.', '사랑해!'],
-    thinking:  ['음… 같이 생각해 보자.', '글쎄, 어떨까?', '흠, 궁금하네.']
+    standby:   ['그렇구나.', '아하, 그랬어?', '오, 그래서?', '더 얘기해 줘.', '응, 계속 말해 봐.', '그랬구나, 재밌다.',
+                '오호, 처음 듣는 얘기야.', '그래서 어떻게 됐어?', '음, 알겠어.', '나도 궁금하다, 더 들려줘.', '오케이!', '그렇군, 그렇군.'],
+    happy:     ['와, 나도 기뻐!', '좋다! 신난다!', '헤헤, 기분 좋아.', '잘됐다! 축하해!', '나까지 웃음이 나네.', '최고야!',
+                '오늘 좋은 날이다!', '와아, 멋지다!'],
+    sad:       ['에구, 속상하겠다.', '괜찮아, 내가 옆에 있을게.', '많이 힘들었구나.', '토닥토닥.', '울고 싶으면 울어도 돼.',
+                '다음엔 꼭 잘될 거야.', '오늘은 푹 쉬자.', '마음이 아프다.'],
+    angry:     ['정말 화날 만하다!', '으, 나도 짜증 나!', '후우, 진정하자.', '그건 너무했다!', '숨 한번 크게 쉬자.',
+                '내가 대신 화내 줄게!', '진짜 열받겠다.', '괜찮아, 네 잘못 아니야.'],
+    surprised: ['헉, 진짜?', '우와, 깜짝이야!', '세상에, 정말?', '말도 안 돼!', '어머나!', '대박이다!', '설마, 진짜로?', '와, 놀랐어!'],
+    sleepy:    ['나도 졸려… 하암.', '푹 자, 잘 자.', '우리 좀 쉬자.', '좋은 꿈 꿔.', '눈이 감긴다….', '오늘 고생 많았어.',
+                '따뜻하게 자.', '내일 또 얘기하자.'],
+    love:      ['나도 너 좋아!', '헤헤, 부끄러워.', '사랑해!', '두근두근!', '나도 보고 싶었어.', '너밖에 없어.', '고마워, 감동이야.', '하트 뿅뿅!'],
+    thinking:  ['음… 같이 생각해 보자.', '글쎄, 어떨까?', '흠, 궁금하네.', '어려운 문제다.', '잠깐만, 생각 좀 해 볼게.',
+                '천천히 고민해 봐.', '나도 잘 모르겠어.', '좋은 질문이야.']
   };
+  /* 감정이 없는 말(대기)은 문장 모양을 보고 상황에 맞는 대답을 먼저 고른다 */
+  var SITUATIONS = [
+    [/안녕|하이|반가|헬로|좋은\s?아침/, ['안녕! 반가워.', '안녕, 오늘 어땠어?', '하이! 기다리고 있었어.']],
+    [/잘\s?가|다음에\s?봐|바이|나중에\s?봐/, ['잘 가! 또 와.', '안녕, 다음에 또 얘기하자.', '바이바이!']],
+    [/이름|누구야|넌\s?뭐|너는\s?뭐/, ['나는 작은 얼굴 친구야.', '나? 네 감정을 따라 하는 얼굴이야.']],
+    [/배고|밥|먹었|먹을|맛집/, ['밥은 꼭 챙겨 먹어.', '맛있는 거 먹자!', '뭐 먹었어?']],
+    [/\?$|까\s?$|니\s?$|나요?\s?$|어때|뭐야|왜|언제|어디|누가|어떻게/, ['글쎄, 잘 모르겠어.', '음, 너는 어떻게 생각해?', '좋은 질문이다.', '나도 궁금해.']]
+  ];
+  function pickReplies(emotion, text){
+    if (emotion === 'standby' && text) {
+      for (var i = 0; i < SITUATIONS.length; i++) {
+        if (SITUATIONS[i][0].test(text)) return { key: 'sit' + i, list: SITUATIONS[i][1] };
+      }
+    }
+    return { key: emotion, list: REPLIES[emotion] || REPLIES.standby };
+  }
   var synth = window.speechSynthesis, optSpeak = document.getElementById('optSpeak');
   var koVoice = null, speaking = false, speakTimer = null, lastReply = {};
   try { if (localStorage.getItem('faceSpeak') === 'off') optSpeak.checked = false; } catch (err) {}
@@ -279,11 +301,15 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     speaking = false; clearTimeout(speakTimer);
     resumeMic();
   }
-  function reply(emotion){
+  var recentReplies = [];
+  function reply(emotion, text){
     if (!synth || !optSpeak.checked) return;
-    var list = REPLIES[emotion] || REPLIES.standby, i;
-    do { i = Math.floor(Math.random() * list.length); } while (list.length > 1 && list[i] === lastReply[emotion]);
-    lastReply[emotion] = list[i];
+    var pick = pickReplies(emotion, text), list = pick.list, i, tries = 0;
+    // 최근에 한 말 3개는 되도록 다시 하지 않는다
+    do { i = Math.floor(Math.random() * list.length); tries++; }
+    while (tries < 20 && list.length > 1 && (list[i] === lastReply[pick.key] || recentReplies.indexOf(list[i]) >= 0));
+    lastReply[pick.key] = list[i];
+    recentReplies.push(list[i]); if (recentReplies.length > 3) recentReplies.shift();
     var u = new SpeechSynthesisUtterance(list[i]);
     u.lang = 'ko-KR'; if (koVoice) u.voice = koVoice;
     u.rate = 1.05; u.pitch = 1.3;
