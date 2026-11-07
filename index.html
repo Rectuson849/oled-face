@@ -270,7 +270,59 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     [/배고|밥|먹었|먹을|맛집/, ['밥은 꼭 챙겨 먹어.', '맛있는 거 먹자!', '뭐 먹었어?']],
     [/\?$|까\s?$|니\s?$|나요?\s?$|어때|뭐야|왜|언제|어디|누가|어떻게/, ['글쎄, 잘 모르겠어.', '음, 너는 어떻게 생각해?', '좋은 질문이다.', '나도 궁금해.']]
   ];
+  /* 대화 데이터에서 가장 비슷한 질문을 찾아 그 대답을 쓴다.
+     데이터: songys/Chatbot_data (MIT, 질문-대답 11,823쌍) → chat_data.json
+     방법: 글자 2개 묶음(bigram) TF-IDF 코사인 유사도. 0.6 이상일 때만 쓴다(그 아래는 엉뚱한 대답이 많음). */
+  var CHAT = null, chatInv = null, chatNorm = null, chatIdf = null, CHAT_MIN = 0.6;
+  function chatGrams(s){
+    s = s.toLowerCase().replace(/[^가-힣a-z0-9]/g, '');
+    var g = {}, out = [];
+    if (s.length === 1) g[s] = 1;
+    for (var i = 0; i < s.length - 1; i++) g[s.substr(i, 2)] = 1;
+    for (var k in g) out.push(k);
+    return out;
+  }
+  function loadChat(){
+    if (location.protocol === 'file:' || !window.fetch) return;
+    fetch('chat_data.json').then(function(r){ return r.ok ? r.json() : null; }).then(function(data){
+      if (!data || !data.length) return;
+      var df = {}, docs = [], inv = {}, i, j, g;
+      for (i = 0; i < data.length; i++) {
+        g = chatGrams(data[i][0]); docs.push(g);
+        for (j = 0; j < g.length; j++) { df[g[j]] = (df[g[j]] || 0) + 1; (inv[g[j]] = inv[g[j]] || []).push(i); }
+      }
+      var idf = {}, n = data.length;
+      for (var k in df) idf[k] = Math.log((n + 1) / (df[k] + 1)) + 1;
+      var norm = new Array(n);
+      for (i = 0; i < n; i++) { var s = 0; for (j = 0; j < docs[i].length; j++) s += idf[docs[i][j]] * idf[docs[i][j]]; norm[i] = Math.sqrt(s); }
+      CHAT = data; chatInv = inv; chatNorm = norm; chatIdf = idf;
+    }).catch(function(){});
+  }
+  loadChat();
+  function chatMatch(text){
+    if (!CHAT || !text) return [];
+    var g = chatGrams(text), qn = 0, sc = {}, i, j, w, list;
+    for (i = 0; i < g.length; i++) {
+      w = chatIdf[g[i]]; if (!w) { w = Math.log(CHAT.length + 1) + 1; qn += w * w; continue; } // 데이터에 없는 글자 묶음도 길이에 넣는다
+      qn += w * w; list = chatInv[g[i]];
+      for (j = 0; j < list.length; j++) sc[list[j]] = (sc[list[j]] || 0) + w * w;
+    }
+    qn = Math.sqrt(qn);
+    var res = [];
+    for (var d in sc) { var s = sc[d] / (qn * chatNorm[d]); if (s >= CHAT_MIN) res.push([s, CHAT[d][1]]); }
+    res.sort(function(a, b){ return b[0] - a[0]; });
+    return res.slice(0, 3);
+  }
   function pickReplies(emotion, text){
+    if (text && !/이름|누구야|넌\s?뭐|너는\s?뭐/.test(text)) {
+      var m = chatMatch(text);
+      if (m.length) {
+        // 가장 비슷한 것과 거의 같은 점수인 것만 후보로 둔다
+        var top = m[0][0], cand = [];
+        for (var c = 0; c < m.length; c++) if (m[c][0] >= top - 0.05) cand.push(m[c][1]);
+        return { key: 'chat', list: cand, how: '대화 데이터 ' + Math.round(top * 100) + '%' };
+      }
+    }
     if (emotion === 'standby' && text) {
       for (var i = 0; i < SITUATIONS.length; i++) {
         if (SITUATIONS[i][0].test(text)) return { key: 'sit' + i, list: SITUATIONS[i][1] };
@@ -308,6 +360,10 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     // 최근에 한 말 3개는 되도록 다시 하지 않는다
     do { i = Math.floor(Math.random() * list.length); tries++; }
     while (tries < 20 && list.length > 1 && (list[i] === lastReply[pick.key] || recentReplies.indexOf(list[i]) >= 0));
+    if (pick.key === 'chat' && recentReplies.indexOf(list[i]) >= 0) { // 같은 말을 또 하면 감정 대답으로
+      pick = { key: emotion, list: REPLIES[emotion] || REPLIES.standby }; list = pick.list;
+      i = Math.floor(Math.random() * list.length);
+    }
     lastReply[pick.key] = list[i];
     recentReplies.push(list[i]); if (recentReplies.length > 3) recentReplies.shift();
     var u = new SpeechSynthesisUtterance(list[i]);
@@ -320,7 +376,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     clearTimeout(speakTimer);
     speakTimer = setTimeout(speechDone, list[i].length * 300 + 3000); // onend가 안 오는 기기 대비
     synth.speak(u);
-    read.textContent += ' · 🔊 “' + list[i] + '”';
+    read.textContent += ' · 🔊 “' + list[i] + '”' + (pick.how ? ' (' + pick.how + ')' : '');
   }
   function send(){
     var text = msg.value.trim();
