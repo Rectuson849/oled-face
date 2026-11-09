@@ -46,12 +46,9 @@ h2{font-size:1rem; margin:0 0 10px}
 .hint{color:var(--pin); font-size:.78rem; text-align:center; margin-top:8px}
 
 section{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px}
-.emos{display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px}
 button{font:inherit; color:var(--btn-ink); background:var(--btn); border:1px solid transparent; border-radius:10px; padding:10px 8px; cursor:pointer; min-height:44px}
 button:focus-visible,input:focus-visible,summary:focus-visible,textarea:focus-visible{outline:3px solid var(--focus); outline-offset:2px}
 button[aria-pressed="true"]{background:var(--on); color:var(--on-ink); font-weight:700}
-.emos button{display:flex; flex-direction:column; align-items:center; gap:0; line-height:1.25}
-.emos small{font-size:.72rem; opacity:.75}
 
 .row{display:flex; gap:8px}
 input[type=text]{flex:1; min-width:0; font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-height:44px}
@@ -71,7 +68,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
 <main>
   <header>
     <h1>OLED 표정 시뮬레이터</h1>
-    <p class="sub">128×64 픽셀 · SSD1306 · 감정 8종</p>
+    <p class="sub">128×64 픽셀 · SSD1306 · 감정 8종 · <span id="ver"></span></p>
   </header>
 
   <div class="device">
@@ -79,11 +76,6 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     <canvas id="oled" width="768" height="384" role="img" aria-label="OLED 화면 시뮬레이션"></canvas>
     <div class="hint">화면 위로 손가락이나 마우스를 움직이면 눈이 따라갑니다</div>
   </div>
-
-  <section>
-    <h2>감정 선택</h2>
-    <div class="emos" id="emos"></div>
-  </section>
 
   <section>
     <h2>대화로 표정 바꾸기</h2>
@@ -163,23 +155,10 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
   var optAuto = document.getElementById('optAuto');
   var optTalk = document.getElementById('optTalk');
 
-  /* ---------- 감정 버튼 ---------- */
-  var emos = document.getElementById('emos');
-  ORDER.forEach(function(name){
-    var b = document.createElement('button');
-    b.type = 'button'; b.dataset.e = name;
-    b.setAttribute('aria-pressed', name === 'standby' ? 'true' : 'false');
-    b.innerHTML = '<span>' + E[name].ko + '</span><small>' + E[name].label + '</small>';
-    b.addEventListener('click', function(){ setEmotion(name); });
-    emos.appendChild(b);
-  });
-
+  /* ---------- 표정 바꾸기 ---------- */
   function setEmotion(name){
     if (name === tgtName) return;
     tgtName = name; tgt = E[name];
-    Array.prototype.forEach.call(emos.children, function(b){
-      b.setAttribute('aria-pressed', b.dataset.e === name ? 'true' : 'false');
-    });
     if (tgt.kind !== kind) trans = { t0: performance.now(), swapped: false };
   }
 
@@ -589,7 +568,10 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     g.beginPath(); g.arc(9, 14, 1.2, 0, Math.PI * 2); g.fill();
     g.font = 'bold 12px ui-monospace, Menlo, Consolas, monospace';
     g.textAlign = 'center';
-    g.fillText(tgt.label, 72, 12);
+    g.fillText(tgt.label, 68, 12);
+    g.font = '8px ui-monospace, Menlo, Consolas, monospace';
+    g.textAlign = 'right';
+    g.fillText(VERSION, 127, 8);
   }
 
   /* ---------- 프레임 ---------- */
@@ -634,6 +616,9 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     return b;
   }
 
+  /* 버전: 화면 위쪽 오른쪽 구석에 작게 표시 */
+  var VERSION = 'v1.4';
+  document.getElementById('ver').textContent = VERSION;
   function render(b, t, now){
     g.globalCompositeOperation = 'source-over';
     g.clearRect(0, 0, W, H);
