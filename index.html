@@ -87,6 +87,8 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     <div class="opts" style="margin-top:10px">
       <label class="opt"><input type="checkbox" id="optSpeak" checked><span class="lbl">🔊 감정에 맞게 소리 내어 대답하기</span></label>
     </div>
+    <button type="button" id="board" aria-pressed="false" style="width:100%;margin-top:10px">📶 보드 연결 (블루투스)</button>
+    <p class="note" id="boardMsg" aria-live="polite"></p>
     <p class="read" id="read" aria-live="polite">글을 입력하거나 마이크로 말하면 감정 단어를 찾아 표정을 바꿉니다.</p>
   </section>
 
@@ -160,7 +162,54 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     if (name === tgtName) return;
     tgtName = name; tgt = E[name];
     if (tgt.kind !== kind) trans = { t0: performance.now(), swapped: false };
+    boardSend(name);
   }
+
+  /* ---------- 보드 연결 (Web Bluetooth → ESP32 "EmotionFace", Nordic UART 서비스) ----------
+     보낼 명령: 표정 이름, "talk 밀리초"(입 움직이기), "stop"
+     안드로이드 크롬에서 https 주소일 때만 된다. 아이폰 사파리는 Web Bluetooth를 지원하지 않는다. */
+  var NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e', NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+  var boardBtn = document.getElementById('board'), boardMsg = document.getElementById('boardMsg');
+  var boardDev = null, boardRx = null, boardChain = Promise.resolve();
+  function boardSend(cmd){
+    if (!boardRx) return;
+    var rx = boardRx, data = new TextEncoder().encode(cmd);
+    // 블루투스 쓰기는 한 번에 하나씩만 된다 → 줄 세워 보냄
+    boardChain = boardChain.then(function(){
+      return (rx.writeValueWithoutResponse ? rx.writeValueWithoutResponse(data) : rx.writeValue(data));
+    }).catch(function(){});
+  }
+  function boardState(on, text){
+    boardBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    boardBtn.textContent = on ? '📶 보드 연결됨 (누르면 끊기)' : '📶 보드 연결 (블루투스)';
+    boardMsg.textContent = text || '';
+  }
+  if (!navigator.bluetooth) {
+    boardBtn.disabled = true;
+    boardMsg.textContent = '이 브라우저는 블루투스 연결을 지원하지 않습니다 (안드로이드 크롬에서 됩니다).';
+  }
+  boardBtn.addEventListener('click', function(){
+    if (boardDev && boardDev.gatt.connected) { boardDev.gatt.disconnect(); return; }
+    boardMsg.textContent = '보드를 찾는 중... 목록에서 EmotionFace를 고르세요.';
+    navigator.bluetooth.requestDevice({ filters: [{ name: 'EmotionFace' }], optionalServices: [NUS] })
+      .then(function(dev){
+        boardDev = dev;
+        dev.addEventListener('gattserverdisconnected', function(){ boardRx = null; boardState(false, '보드 연결이 끊겼습니다.'); });
+        boardMsg.textContent = '연결하는 중...';
+        return dev.gatt.connect();
+      })
+      .then(function(srv){ return srv.getPrimaryService(NUS); })
+      .then(function(svc){ return svc.getCharacteristic(NUS_RX); })
+      .then(function(ch){
+        boardRx = ch;
+        boardState(true, '보드와 연결됐습니다. 말하면 보드 얼굴도 같이 바뀝니다.');
+        boardSend(tgtName);
+      })
+      .catch(function(err){
+        boardRx = null;
+        boardState(false, err && err.name === 'NotFoundError' ? '보드를 고르지 않았습니다.' : '연결하지 못했습니다: ' + (err && err.message || err));
+      });
+  });
 
   /* ---------- 대화 → 감정 ---------- */
   var RULES = [
@@ -330,6 +379,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
   function speechDone(){
     if (!speaking) return;
     speaking = false; clearTimeout(speakTimer);
+    boardSend('stop');
     resumeMic();
   }
   var recentReplies = [];
@@ -355,6 +405,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
     clearTimeout(speakTimer);
     speakTimer = setTimeout(speechDone, list[i].length * 300 + 3000); // onend가 안 오는 기기 대비
     synth.speak(u);
+    boardSend('talk ' + (list[i].length * 250 + 800)); // 보드도 대답하는 동안 입을 움직임
     read.textContent += ' · 🔊 “' + list[i] + '”' + (pick.how ? ' (' + pick.how + ')' : '');
   }
   function send(){
@@ -617,7 +668,7 @@ textarea{width:100%; height:260px; margin-top:10px; font:12px/1.45 ui-monospace,
   }
 
   /* 버전: 화면 위쪽 오른쪽 구석에 작게 표시 */
-  var VERSION = 'v1.4';
+  var VERSION = 'v1.5';
   document.getElementById('ver').textContent = VERSION;
   function render(b, t, now){
     g.globalCompositeOperation = 'source-over';
