@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>감정 얼굴 원격 조작</title>
+<meta name="robots" content="noindex">
+<style>
+:root{
+  --bg:#f1f3f2; --panel:#ffffff; --ink:#15201f; --muted:#56655f; --line:#d3dad7;
+  --btn:#e6ebe9; --btn-ink:#15201f; --on:#0c6b78; --on-ink:#ffffff; --bad:#b3261e; --ok:#1d7a3a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1413; --panel:#172120; --ink:#e6efed; --muted:#9db0aa; --line:#2b3a37;
+    --btn:#223230; --btn-ink:#e6efed; --on:#27d3ee; --on-ink:#04171a; --bad:#ff8a80; --ok:#7ddc94;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+main{max-width:520px; margin:0 auto; padding:16px}
+h1{font-size:20px; margin:4px 0 12px}
+h2{font-size:15px; color:var(--muted); margin:0 0 8px; font-weight:600}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px}
+.row{display:flex; flex-wrap:wrap; gap:8px}
+button{font:inherit; font-size:15px; border:0; border-radius:10px; padding:10px 12px; min-height:44px;
+  background:var(--btn); color:var(--btn-ink); cursor:pointer}
+button.on{background:var(--on); color:var(--on-ink)}
+button:disabled{opacity:.45; cursor:default}
+.grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+.grid4 button{padding:8px 4px; font-size:14px}
+.grid4 .em{display:block; font-size:22px; line-height:1.2}
+input[type=text]{font:inherit; font-size:16px; width:100%; padding:10px 12px; min-height:44px;
+  border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink)}
+.status{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--muted)}
+.dot{width:10px; height:10px; border-radius:50%; background:var(--muted); flex:none}
+.dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+.state{font-size:15px; line-height:1.6}
+.state b{font-weight:600}
+.small{font-size:13px; color:var(--muted); line-height:1.5}
+.say{display:flex; gap:8px} .say input{flex:1}
+</style>
+</head>
+<body>
+<main>
+  <h1>감정 얼굴 원격 조작</h1>
+
+  <div class="card" id="setup" hidden>
+    <h2>원격 주소 넣기</h2>
+    <p class="small">보드 웹 화면(같은 와이파이에서 보드 IP로 접속) → "밖에서 조작"에 나오는 주소를 그대로 여세요.
+      또는 주소 끝의 # 뒤 12글자를 아래에 넣으세요.</p>
+    <div class="say"><input type="text" id="ridIn" placeholder="예: abcd2345efgh" autocomplete="off"><button id="ridGo">연결</button></div>
+  </div>
+
+  <div class="card">
+    <div class="status"><span class="dot" id="dot"></span><span id="conn">연결 준비 중...</span></div>
+    <div class="state" id="state" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>표정</h2>
+    <div class="grid4" id="faces"></div>
+  </div>
+
+  <div class="card">
+    <h2>말 시키기</h2>
+    <div class="say"><input type="text" id="sayIn" maxlength="100" placeholder="보드에게 할 말 (예: 오늘 기분 어때?)"><button id="sayGo">보내기</button></div>
+    <p class="small">보드가 들은 말처럼 받아서 표정을 짓고 스피커로 대답합니다.</p>
+  </div>
+
+  <div class="card">
+    <h2>인터넷 라디오</h2>
+    <div class="row" id="radios"></div>
+  </div>
+
+  <div class="card">
+    <h2>음악</h2>
+    <div class="row">
+      <button data-cmd="play">SD 카드 아무 곡</button>
+      <button data-cmd="musicstop">멈춤</button>
+      <button id="muteBtn" data-cmd="mute">대답 소리 끄기</button>
+    </div>
+  </div>
+
+  <p class="small">이 주소를 아는 사람은 누구나 조작할 수 있으니 다른 사람에게 알려 주지 마세요.
+    주소가 알려졌으면 보드 웹 화면의 "새 주소 만들기"로 바꾸세요. 명령은 공개 중계 서버(HiveMQ)를 거칩니다.</p>
+</main>
+
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+(function () {
+  var FACES = [
+    ['standby', '😐', '보통'], ['happy', '😊', '기쁨'], ['sad', '😢', '슬픔'], ['angry', '😠', '화남'],
+    ['surprised', '😲', '놀람'], ['sleepy', '😪', '졸림'], ['love', '😍', '사랑'], ['thinking', '🤔', '생각']
+  ];
+  var RADIOS = [['kpop', '케이팝'], ['ballad', '발라드'], ['pop', '팝'], ['jazz', '재즈'],
+    ['classical', '클래식'], ['lofi', '로파이'], ['piano', '피아노'], ['news', '뉴스']];
+  var NAMES = {}; FACES.forEach(function (f) { NAMES[f[0]] = f[1] + ' ' + f[2]; });
+
+  var $ = function (id) { return document.getElementById(id); };
+  var client = null, rid = '', online = false, connected = false;
+
+  // 버튼 만들기
+  FACES.forEach(function (f) {
+    var b = document.createElement('button');
+    b.dataset.cmd = f[0]; b.dataset.face = f[0];
+    b.innerHTML = '<span class="em">' + f[1] + '</span>' + f[2];
+    $('faces').appendChild(b);
+  });
+  RADIOS.forEach(function (r) {
+    var b = document.createElement('button');
+    b.dataset.cmd = 'radio' + r[0]; b.textContent = r[1];
+    $('radios').appendChild(b);
+  });
+
+  function setConn(text, cls) { $('conn').textContent = text; $('dot').className = 'dot ' + (cls || ''); }
+  function enable(on) {
+    document.querySelectorAll('button[data-cmd], #sayGo').forEach(function (b) { b.disabled = !on; });
+  }
+  function send(cmd) {
+    if (!client || !connected) return;
+    client.publish('emoface/' + rid + '/cmd', cmd);
+  }
+  function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+  function showState(s) {
+    var h = '표정: <b>' + esc(NAMES[s.emo] || s.emo || '-') + '</b>';
+    h += '<br>음악: <b>' + (s.music ? esc(s.music) : '없음') + '</b>';
+    if (s.heard) h += '<br>화면 글: ' + esc(s.heard);
+    $('state').innerHTML = h;
+    document.querySelectorAll('[data-face]').forEach(function (b) { b.classList.toggle('on', b.dataset.face === s.emo); });
+    var mb = $('muteBtn');
+    mb.dataset.cmd = s.speak ? 'mute' : 'unmute';
+    mb.textContent = s.speak ? '대답 소리 끄기' : '대답 소리 켜기';
+  }
+
+  function start() {
+    if (client) { try { client.end(true); } catch (e) {} }
+    enable(false);
+    setConn('중계 서버에 연결 중...', '');
+    var cid = 'emoface-remote-' + Math.random().toString(36).slice(2, 10);
+    client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', { clientId: cid, clean: true, reconnectPeriod: 4000, connectTimeout: 10000 });
+    client.on('connect', function () {
+      connected = true;
+      client.subscribe(['emoface/' + rid + '/state', 'emoface/' + rid + '/online']);
+      setConn(online ? '보드 연결됨' : '보드 응답 기다리는 중...', online ? 'ok' : '');
+      enable(true);
+    });
+    client.on('message', function (topic, payload) {
+      var t = topic.split('/').pop(), v = payload.toString();
+      if (t === 'online') {
+        online = v === '1';
+        setConn(online ? '보드 연결됨' : '보드가 꺼져 있거나 인터넷에 연결되지 않았습니다', online ? 'ok' : 'bad');
+      } else if (t === 'state') {
+        try { showState(JSON.parse(v)); } catch (e) {}
+      }
+    });
+    client.on('close', function () { connected = false; enable(false); setConn('중계 서버 연결 끊김, 다시 연결 중...', 'bad'); });
+    client.on('error', function () { setConn('중계 서버 연결 오류', 'bad'); });
+  }
+
+  function useId(id) {
+    id = (id || '').trim().replace(/^.*#/, '').toLowerCase();
+    if (!/^[a-z0-9]{12}$/.test(id)) { $('setup').hidden = false; setConn('원격 주소가 없습니다', 'bad'); enable(false); return false; }
+    rid = id;
+    try { localStorage.setItem('emofaceRid', id); } catch (e) {}
+    if (location.hash.slice(1) !== id) history.replaceState(null, '', '#' + id);
+    $('setup').hidden = true;
+    start();
+    return true;
+  }
+
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-cmd]');
+    if (b && !b.disabled) send(b.dataset.cmd);
+  });
+  function sayIt() {
+    var t = $('sayIn').value.trim();
+    if (!t) return;
+    send('say ' + t);
+    $('sayIn').value = '';
+  }
+  $('sayGo').addEventListener('click', sayIt);
+  $('sayIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') sayIt(); });
+  $('ridGo').addEventListener('click', function () { useId($('ridIn').value); });
+
+  if (typeof mqtt === 'undefined') { setConn('연결 도구를 불러오지 못했습니다. 인터넷 연결을 확인하세요', 'bad'); enable(false); return; }
+  var saved = '';
+  try { saved = localStorage.getItem('emofaceRid') || ''; } catch (e) {}
+  useId(location.hash.slice(1) || saved);
+  window.addEventListener('hashchange', function () { useId(location.hash.slice(1)); });
+})();
+</script>
+</body>
+</html>
