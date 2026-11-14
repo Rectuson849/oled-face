@@ -80,7 +80,30 @@ input[type=text]{font:inherit; font-size:16px; width:100%; padding:10px 12px; mi
       <button data-cmd="play">SD 카드 아무 곡</button>
       <button data-cmd="musicstop">멈춤</button>
       <button id="muteBtn" data-cmd="mute">대답 소리 끄기</button>
+      <button data-cmd="next">다음 곡</button>
+      <button data-cmd="voldown">소리 −</button>
+      <button data-cmd="volup">소리 +</button>
+      <button id="danceBtn" data-cmd="danceoff">춤 끄기</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>놀이·도우미</h2>
+    <div class="row">
+      <button data-cmd="rps">✊ 가위바위보</button>
+      <button data-cmd="pet">쓰다듬기</button>
+      <button data-cmd="poke">콕 찌르기</button>
+      <button id="sleepBtn" data-cmd="sleep">재우기</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button data-cmd="timer 60">타이머 1분</button>
+      <button data-cmd="timer 180">3분</button>
+      <button data-cmd="timer 300">5분</button>
+      <button data-cmd="timer 600">10분</button>
+      <button data-cmd="timeroff">타이머·알람 끄기</button>
+    </div>
+    <div class="say" style="margin-top:8px"><input type="text" id="alarmIn" placeholder="알람 시각 (예: 07:30)" maxlength="5"><button id="alarmGo">알람 맞추기</button></div>
+    <p class="small">가위바위보는 보드가 손을 낸 뒤 "말 시키기"에 가위·바위·보 중 하나를 보내면 승부가 납니다.</p>
   </div>
 
   <p class="small">이 주소를 아는 사람은 누구나 조작할 수 있으니 다른 사람에게 알려 주지 마세요.
@@ -128,7 +151,17 @@ input[type=text]{font:inherit; font-size:16px; width:100%; padding:10px 12px; mi
     var h = '표정: <b>' + esc(NAMES[s.emo] || s.emo || '-') + '</b>';
     h += '<br>음악: <b>' + (s.music ? esc(s.music) : '없음') + '</b>';
     if (s.heard) h += '<br>화면 글: ' + esc(s.heard);
+    if (s.wx) h += '<br>날씨: ' + esc(s.wx);
+    var extra = [];
+    if (s.sleep) extra.push('자는 중');
+    if (s.vol !== undefined) extra.push('소리 ' + s.vol + '/10');
+    if (s.timer) extra.push('타이머 ' + Math.floor(s.timer / 60) + ':' + ('0' + s.timer % 60).slice(-2));
+    if (s.alarm) extra.push('알람 ' + esc(s.alarm));
+    if (extra.length) h += '<br>' + extra.join(' · ');
     $('state').innerHTML = h;
+    var db = $('danceBtn'), sb = $('sleepBtn');
+    if (s.dance !== undefined) { db.dataset.cmd = s.dance ? 'danceoff' : 'danceon'; db.textContent = s.dance ? '춤 끄기' : '춤 켜기'; }
+    if (s.sleep !== undefined) { sb.dataset.cmd = s.sleep ? 'wake' : 'sleep'; sb.textContent = s.sleep ? '깨우기' : '재우기'; }
     document.querySelectorAll('[data-face]').forEach(function (b) { b.classList.toggle('on', b.dataset.face === s.emo); });
     var mb = $('muteBtn');
     mb.dataset.cmd = s.speak ? 'mute' : 'unmute';
@@ -184,6 +217,11 @@ input[type=text]{font:inherit; font-size:16px; width:100%; padding:10px 12px; mi
   $('sayGo').addEventListener('click', sayIt);
   $('sayIn').addEventListener('keydown', function (e) { if (e.key === 'Enter') sayIt(); });
   $('ridGo').addEventListener('click', function () { useId($('ridIn').value); });
+  $('alarmGo').addEventListener('click', function () {
+    var m = /^(\d{1,2}):?(\d{2})$/.exec($('alarmIn').value.trim());
+    if (!m || +m[1] > 23 || +m[2] > 59) { $('alarmIn').value = ''; $('alarmIn').placeholder = '예: 07:30 처럼 넣어 주세요'; return; }
+    send('alarm ' + m[1] + ':' + m[2]); $('alarmIn').value = '';
+  });
 
   if (typeof mqtt === 'undefined') { setConn('연결 도구를 불러오지 못했습니다. 인터넷 연결을 확인하세요', 'bad'); enable(false); return; }
   var saved = '';
